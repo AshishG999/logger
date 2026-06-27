@@ -1,79 +1,73 @@
 import { Kernel } from "./core/kernel";
-import { RuntimeEngine } from "./engine/runtime-engine";
-import { TransactionService } from "./transaction/service";
-import { ConfigManager } from "./config/manager";
-import { EnrichmentPipeline } from "./enrichment/pipeline";
-import { FileStorage } from "./storage/file-storage";
-import type { RuntimeConfig, RuntimePlugin } from "./types";
+import type { RuntimeKernelConfig } from "./core/configuration";
+import type { IPlugin, PluginConfiguration } from "@agstack/plugin-sdk";
 
-export const version = "0.2.0";
+export const version = "2.0.0";
 
 let kernel: Kernel | null = null;
-let plugins: RuntimePlugin[] = [];
 
-export async function initialize(config?: Partial<RuntimeConfig>): Promise<void> {
+export async function initialize(config?: RuntimeKernelConfig): Promise<void> {
   if (kernel) return;
 
-  ConfigManager.initialize(config);
-  kernel = new Kernel();
+  kernel = new Kernel(config);
 
-  const transactionService = new TransactionService();
-  transactionService.register(kernel.eventBus);
-
-  const runtimeEngine = new RuntimeEngine();
-  await runtimeEngine.initialize(kernel);
-
-  // Register user-provided plugins
   if (config?.plugins) {
     for (const factory of config.plugins) {
       const plugin = await factory();
-      await plugin.initialize(kernel.facade());
-      plugins.push(plugin);
+      registerPlugin(plugin);
     }
   }
 
-  // Default built-in storage if no storage plugin was registered
-  if (!plugins.some((p) => p.name.startsWith("storage"))) {
-    const storage = new FileStorage();
-    await storage.initialize(kernel.facade());
-    plugins.push(storage);
-  }
-
-  registerCollectors(kernel, transactionService);
-  // Register enrichment pipeline (Stage 2) between worker and storage
-  const enrichment = new EnrichmentPipeline();
-  enrichment.register(kernel.eventBus);
-
   await kernel.boot();
+}
+
+export function registerPlugin(
+  plugin: IPlugin,
+  pluginConfig?: Partial<PluginConfiguration>
+): void {
+  if (!kernel) {
+    throw new Error("Kernel not initialized. Call initialize() first.");
+  }
+  kernel.registerPlugin(plugin, pluginConfig);
 }
 
 export async function shutdown(): Promise<void> {
   if (!kernel) return;
   await kernel.shutdown();
-  for (const plugin of plugins) {
-    await plugin.shutdown();
-  }
-  plugins = [];
   kernel = null;
 }
 
-function registerCollectors(kernel: Kernel, ts: TransactionService): void {
-  const bus = kernel.eventBus;
-
-  bus.subscribe("transaction.completed", (event: any) => {
-    const { transaction } = event.payload;
-    const priority = transaction.response?.statusCode && transaction.response.statusCode >= 500 ? 0 : 1;
-    const accepted = kernel.queue.enqueue(transaction, { priority });
-    if (!accepted) {
-      bus.publish("queue.backpressure", { transaction }, {
-        source: "kernel",
-        correlationId: transaction.correlationId,
-        priority: 0,
-      });
-    }
-  }, { sync: true });
-
-  bus.subscribe("error.uncaught", (event: any) => {
-    kernel.eventBus.publish("error.queued", event.payload, { priority: 0, source: "kernel" });
-  }, { sync: true });
+export function getKernel(): Kernel {
+  if (!kernel) {
+    throw new Error("Kernel not initialized. Call initialize() first.");
+  }
+  return kernel;
 }
+
+export function isInitialized(): boolean {
+  return kernel !== null;
+}
+
+export { Kernel } from "./core/kernel";
+export { EventBus } from "./core/event-bus";
+export { Queue } from "./core/queue";
+export { WorkerPool } from "./core/worker-pool";
+export { LifecycleManager } from "./core/lifecycle";
+export { PluginManager } from "./core/plugin-manager";
+export { HookEngine } from "./core/hook-engine";
+export { ConfigurationManager } from "./core/configuration";
+export { HealthMonitor } from "./core/health-monitor";
+export { MetricsCollector } from "./core/metrics";
+export { TransactionEngine } from "./transaction/engine";
+export { RequestCollector } from "./collectors/request";
+export { ResponseCollector } from "./collectors/response";
+export type { Transaction } from "./transaction/engine";
+export type { RawRequestInfo, RawResponseInfo, TransactionStatus, TransactionError, TimelineEvent, PayloadMetadata } from "./transaction/engine";
+export type { KernelStats } from "./core/kernel";
+export type { SystemHealth } from "./core/health-monitor";
+export type { RuntimeKernelConfig } from "./core/configuration";
+export type { QueueStats, QueueItem, QueueConsumer } from "./core/queue";
+export type { WorkerPoolOptions, WorkerStats } from "./core/worker-pool";
+export type { PluginRegistration, PluginRegistrationState } from "./core/plugin-manager";
+export type { KernelState, ShutdownHandler } from "./core/lifecycle";
+export type { HookRegistration } from "./core/hook-engine";

@@ -1,13 +1,82 @@
-import type { Transaction, RequestInfo, ResponseInfo, TimelineEvent, DatabaseOperation, ExternalCall, ErrorEvent } from "../types";
+import type { TransactionStatus, TimelineEventData } from "@agstack/plugin-sdk";
 import { generateId, generateTraceId, generateCorrelationId, generateRequestId } from "../utils/id";
+
+export type { TransactionStatus } from "@agstack/plugin-sdk";
+
+export interface RawRequestInfo {
+  timestamp: number;
+  method: string;
+  protocol: string;
+  httpVersion: string;
+  host: string;
+  url: string;
+  path: string;
+  query: Record<string, string | string[]>;
+  params: Record<string, string>;
+  headers: Record<string, string>;
+  contentType: string;
+  contentLength: number;
+  requestId: string;
+  correlationId: string;
+  traceId: string;
+  clientIp: string;
+  userAgent: string;
+}
+
+export interface RawResponseInfo {
+  statusCode: number;
+  statusMessage: string;
+  headers: Record<string, string>;
+  contentType: string;
+  responseSize: number;
+  executionTime: number;
+}
+
+export interface Transaction {
+  id: string;
+  correlationId: string;
+  traceId: string;
+  status: TransactionStatus;
+  request: RawRequestInfo;
+  response?: RawResponseInfo;
+  metadata: Record<string, unknown>;
+  errors: TransactionError[];
+  events: TimelineEvent[];
+  startedAt: number;
+  completedAt?: number;
+  duration?: number;
+  payloadMetadata?: PayloadMetadata;
+}
+
+export interface TransactionError {
+  id: string;
+  type: string;
+  message: string;
+  stack?: string;
+  severity: "low" | "medium" | "high" | "critical";
+  timestamp: number;
+}
+
+export type TimelineEvent = TimelineEventData;
+
+export interface PayloadMetadata {
+  contentType?: string;
+  size?: number;
+  preview?: string;
+  hash?: string;
+  encoding?: string;
+  isMultipart: boolean;
+  isStreaming: boolean;
+  isBase64?: boolean;
+}
 
 export class TransactionEngine {
   private activeTransactions = new Map<string, Transaction>();
 
-  create(requestInfo: Partial<RequestInfo>): Transaction {
+  create(request: RawRequestInfo): Transaction {
     const id = generateId();
-    const correlationId = requestInfo.correlationId || generateCorrelationId();
-    const traceId = requestInfo.traceId || generateTraceId();
+    const correlationId = request.correlationId || generateCorrelationId();
+    const traceId = request.traceId || generateTraceId();
 
     const transaction: Transaction = {
       id,
@@ -15,36 +84,27 @@ export class TransactionEngine {
       traceId,
       status: "in_progress",
       request: {
-        timestamp: requestInfo.timestamp || Date.now(),
-        method: requestInfo.method || "GET",
-        protocol: requestInfo.protocol || "HTTP/1.1",
-        httpVersion: requestInfo.httpVersion || "1.1",
-        host: requestInfo.host || "",
-        url: requestInfo.url || "",
-        originalUrl: requestInfo.originalUrl || requestInfo.url || "",
-        path: requestInfo.path || "",
-        query: requestInfo.query || {},
-        params: requestInfo.params || {},
-        headers: requestInfo.headers || {},
-        cookies: requestInfo.cookies || {},
-        contentType: requestInfo.contentType || "",
-        contentLength: requestInfo.contentLength || 0,
-        requestId: requestInfo.requestId || generateRequestId(),
+        timestamp: request.timestamp,
+        method: request.method,
+        protocol: request.protocol,
+        httpVersion: request.httpVersion,
+        host: request.host,
+        url: request.url,
+        path: request.path,
+        query: request.query || {},
+        params: request.params || {},
+        headers: request.headers || {},
+        contentType: request.contentType || "",
+        contentLength: request.contentLength || 0,
+        requestId: request.requestId || generateRequestId(),
         correlationId,
         traceId,
-        clientIp: requestInfo.clientIp || "",
-        proxyHeaders: requestInfo.proxyHeaders || {},
-        userAgent: requestInfo.userAgent || "",
-        language: requestInfo.language || "",
-        accept: requestInfo.accept || "",
-        origin: requestInfo.origin || "",
-        referer: requestInfo.referer || "",
+        clientIp: request.clientIp || "",
+        userAgent: request.userAgent || "",
       },
-      databaseOps: [],
-      externalCalls: [],
+      metadata: {},
       errors: [],
       events: [],
-      metadata: {},
       startedAt: Date.now(),
     };
 
@@ -56,17 +116,18 @@ export class TransactionEngine {
     return this.activeTransactions.get(id);
   }
 
-  complete(id: string, response?: Partial<ResponseInfo>): Transaction | undefined {
+  complete(id: string, response?: RawResponseInfo): Transaction | undefined {
     const t = this.activeTransactions.get(id);
     if (t) {
-      t.status = "completed";
+      t.status = response && response.statusCode >= 400 ? "error" : "completed";
       t.completedAt = Date.now();
       t.duration = t.completedAt - t.startedAt;
+      if (response) t.response = response;
     }
     return t;
   }
 
-  fail(id: string, error?: ErrorEvent): Transaction | undefined {
+  fail(id: string, error?: TransactionError): Transaction | undefined {
     const t = this.activeTransactions.get(id);
     if (t) {
       t.status = "error";
@@ -75,58 +136,6 @@ export class TransactionEngine {
       if (error) t.errors.push(error);
     }
     return t;
-  }
-
-  addEvent(transactionId: string, event: TimelineEvent): void {
-    this.activeTransactions.get(transactionId)?.events.push(event);
-  }
-
-  addDatabaseOp(transactionId: string, op: DatabaseOperation): void {
-    const t = this.activeTransactions.get(transactionId);
-    if (t) {
-      t.databaseOps.push(op);
-      t.events.push({
-        id: generateId(),
-        name: `db_${op.system}_${op.operation}`,
-        category: "database",
-        startTime: op.timestamp,
-        endTime: op.timestamp + op.executionTime,
-        duration: op.executionTime,
-        details: { system: op.system, operation: op.operation, query: op.query },
-      });
-    }
-  }
-
-  addExternalCall(transactionId: string, call: ExternalCall): void {
-    const t = this.activeTransactions.get(transactionId);
-    if (t) {
-      t.externalCalls.push(call);
-      t.events.push({
-        id: generateId(),
-        name: `http_${call.method}_${call.url}`,
-        category: "external_http",
-        startTime: call.timestamp,
-        endTime: call.timestamp + call.latency,
-        duration: call.latency,
-        details: { url: call.url, method: call.method, status: call.responseStatus },
-      });
-    }
-  }
-
-  addError(transactionId: string, error: ErrorEvent): void {
-    const t = this.activeTransactions.get(transactionId);
-    if (t) {
-      t.errors.push(error);
-      t.events.push({
-        id: generateId(),
-        name: `error_${error.type}`,
-        category: "error",
-        startTime: error.timestamp,
-        endTime: error.timestamp,
-        duration: 0,
-        details: { type: error.type, message: error.message, severity: error.severity },
-      });
-    }
   }
 
   remove(id: string): void {

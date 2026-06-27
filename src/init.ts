@@ -1,1 +1,7 @@
-export { initialize } from "./index";
+export {
+  initialize,
+  shutdown,
+  registerPlugin,
+  getKernel,
+  isInitialized,
+} from "./index";

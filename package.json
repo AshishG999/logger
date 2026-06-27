@@ -3,8 +3,8 @@
   "publishConfig": {
     "access": "public"
   },
-  "version": "1.0.0",
-  "description": "Autonomous Runtime Observability SDK for Node.js",
+  "version": "2.0.0",
+  "description": "AGStack Runtime Kernel — lightweight, high-performance runtime lifecycle, HTTP interception, plugin execution, and observability foundation",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -35,33 +35,34 @@
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit",
     "clean": "rimraf dist",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build && npm test"
   },
   "keywords": [
-    "observability",
+    "agstack",
     "runtime",
-    "monitoring",
-    "telemetry",
-    "tracing",
+    "kernel",
+    "observability",
+    "middleware",
     "nodejs",
-    "autonomous",
-    "agstack"
+    "plugin",
+    "lifecycle"
   ],
   "author": "Ashish Gholap",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/AshishG999/logger.git"
+    "url": "git+https://github.com/AshishG999/logger.git"
   },
-   "homepage": "https://github.com/AshishG999/logger#readme",
+  "homepage": "https://github.com/AshishG999/logger#readme",
   "bugs": {
     "url": "https://github.com/AshishG999/logger/issues"
   },
   "engines": {
     "node": ">=18.0.0"
   },
-  "dependencies": {},
-  "optionalDependencies": {},
+  "dependencies": {
+    "@agstack/plugin-sdk": "^0.1.0"
+  },
   "devDependencies": {
     "@types/node": "^20.14.0",
     "eslint": "^9.0.0",

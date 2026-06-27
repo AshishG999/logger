@@ -1,4 +1,10 @@
-export type KernelState = "created" | "booting" | "running" | "stopping" | "stopped";
+export type KernelState =
+  | "created"
+  | "booting"
+  | "running"
+  | "stopping"
+  | "stopped"
+  | "error";
 
 export type ShutdownHandler = () => Promise<void>;
 
@@ -8,6 +14,10 @@ export class LifecycleManager {
 
   get state(): KernelState {
     return this._state;
+  }
+
+  setErrorState(): void {
+    this._state = "error";
   }
 
   onBeforeShutdown(handler: ShutdownHandler): void {
@@ -21,7 +31,7 @@ export class LifecycleManager {
       await bootFn();
       this._state = "running";
     } catch (error) {
-      this._state = "stopped";
+      this._state = "error";
       throw error;
     }
   }
@@ -42,7 +52,9 @@ export class LifecycleManager {
 
   assertRunning(): void {
     if (this._state !== "running") {
-      throw new Error(`Kernel is in "${this._state}" state. Must be "running".`);
+      throw new Error(
+        `Kernel is in "${this._state}" state. Must be "running".`
+      );
     }
   }
 }

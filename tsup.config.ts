@@ -7,7 +7,7 @@ export default defineConfig({
   clean: true,
   target: "node18",
   platform: "node",
-  external: [/^node:/],
+  external: [/^node:/, "@agstack/plugin-sdk"],
   treeshake: "recommended",
   shims: false,
   sourcemap: false,

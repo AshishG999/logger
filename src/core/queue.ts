@@ -28,6 +28,7 @@ export class Queue<T = unknown> {
   private highWaterMark: number;
   private _backpressure = false;
   private drainResolve: (() => void) | null = null;
+  private processedCount = 0;
 
   constructor(maxSize = 10000) {
     this.maxSize = maxSize;
@@ -51,7 +52,9 @@ export class Queue<T = unknown> {
 
     this.insertSorted(item);
 
-    if (this.items.length < this.highWaterMark) {
+    if (this.items.length >= this.highWaterMark) {
+      this._backpressure = true;
+    } else {
       this._backpressure = false;
     }
 
@@ -74,6 +77,7 @@ export class Queue<T = unknown> {
 
   complete(id: string): void {
     this.processing.delete(id);
+    this.processedCount++;
     this.tryDrain();
   }
 

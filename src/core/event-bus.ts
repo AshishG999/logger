@@ -1,20 +1,6 @@
-export type EventPriority = 0 | 1 | 2;
+import type { RuntimeEventType, EventPayloadMap, BusEvent, EventPriority, EventHandler } from "@agstack/plugin-sdk";
 
-export interface BusEvent<T = unknown> {
-  readonly type: string;
-  readonly payload: T;
-  readonly metadata: {
-    readonly id: string;
-    readonly timestamp: bigint;
-    readonly source: string;
-    readonly priority: EventPriority;
-    readonly correlationId?: string;
-  };
-}
-
-export interface EventHandler<T = unknown> {
-  (event: BusEvent<T>): void | Promise<void>;
-}
+export type { EventHandler } from "@agstack/plugin-sdk";
 
 export interface SubscribeOptions {
   priority?: number;
@@ -34,22 +20,26 @@ export class EventBus {
   private deadLetter: BusEvent[] = [];
   private readonly maxDeadLetter = 1000;
 
-  publish<T>(type: string, payload: T, options?: {
-    priority?: EventPriority;
-    source?: string;
-    correlationId?: string;
-  }): void {
+  publish<T extends RuntimeEventType>(
+    type: T,
+    payload: EventPayloadMap[T],
+    options?: {
+      priority?: EventPriority;
+      source?: string;
+      correlationId?: string;
+    }
+  ): void {
     const event: BusEvent<T> = {
       type,
       payload,
       metadata: {
         id: crypto.randomUUID(),
-        timestamp: process.hrtime.bigint(),
+        timestamp: Date.now(),
         source: options?.source || "unknown",
-        priority: options?.priority ?? 1,
+        priority: (options?.priority ?? 2) as EventPriority,
         correlationId: options?.correlationId,
       },
-    };
+    } as BusEvent<T>;
 
     const handlers = this.subscribers.get(type);
     if (!handlers) return;
@@ -59,24 +49,32 @@ export class EventBus {
 
       const deliver = () => this.deliver(event as any, entry);
 
-      if (entry.options.sync || event.metadata.priority === 0) {
+      if (entry.options.sync) {
         deliver();
-      } else if (event.metadata.priority === 1) {
-        queueMicrotask(deliver);
       } else {
         setImmediate(deliver);
       }
     }
   }
 
-  subscribe<T>(type: string, handler: EventHandler<T>, options?: SubscribeOptions): void {
-    const entry: HandlerEntry = { handler: handler as EventHandler, options: options || {} };
+  subscribe<T extends RuntimeEventType>(
+    type: T,
+    handler: EventHandler<T>,
+    options?: SubscribeOptions
+  ): void {
+    const entry: HandlerEntry = {
+      handler: handler as EventHandler,
+      options: options || {},
+    };
     const existing = this.subscribers.get(type) || [];
     existing.push(entry);
     this.subscribers.set(type, existing);
   }
 
-  unsubscribe<T>(type: string, handler: EventHandler<T>): void {
+  unsubscribe<T extends RuntimeEventType>(
+    type: T,
+    handler: EventHandler<T>
+  ): void {
     const existing = this.subscribers.get(type);
     if (!existing) return;
     this.subscribers.set(
@@ -93,6 +91,19 @@ export class EventBus {
     this.deadLetter = [];
   }
 
+  clear(): void {
+    this.subscribers.clear();
+    this.deadLetter = [];
+  }
+
+  subscriberCount(): number {
+    let count = 0;
+    for (const handlers of this.subscribers.values()) {
+      count += handlers.length;
+    }
+    return count;
+  }
+
   private async deliver(event: BusEvent, entry: HandlerEntry): Promise<void> {
     const maxRetries = entry.options.retries ?? 0;
     const timeout = entry.options.timeout ?? 0;
@@ -104,7 +115,7 @@ export class EventBus {
           if (timeout > 0) {
             await Promise.race([
               result,
-              new Promise((_, reject) =>
+              new Promise<never>((_, reject) =>
                 setTimeout(() => reject(new Error("Handler timeout")), timeout)
               ),
             ]);
@@ -113,7 +124,7 @@ export class EventBus {
           }
         }
         return;
-      } catch (error) {
+      } catch {
         if (attempt === maxRetries) {
           this.deadLetter.push(event);
           if (this.deadLetter.length > this.maxDeadLetter) {
